@@ -23,23 +23,18 @@ def fetch_sub_reddit_data(sub_reddit_name: str,duration: int) -> dict:
     logger.info("[Task] Starting subreddit data extraction for sub_reddit_name: %s", sub_reddit_name)
 
     extractor = SubRedditDataExtractor()
-
+    kafka_producer = KafkaProducer()
     try:
-        extractor.fetch_sub_reddit_data(sub_reddit_name,duration)
+        sub_reddit_data = extractor.fetch_sub_reddit_data(sub_reddit_name,duration)
         logger.info("[Task] Completed subreddit data extraction for sub_reddit_name: %s", sub_reddit_name)
 
-        # Publish message for control matrix extraction
-        kafka_producer = KafkaProducer()
-        kafka_producer.produce_message(
-            topic=settings.SUB_REDDIT_DATA_TOPIC,
-            message={
-                "sub_reddit_name": sub_reddit_name,
-                "duration": duration
-            }
-        )
+        for data in sub_reddit_data:
+            kafka_producer.produce_message(
+                topic=settings.EMBEDDINGS_TOPIC,
+                message=data
+            )
         logger.info(f"Sent sub_reddit_name to SubReddit Data Extraction for {sub_reddit_name}")
         
-        return {"sub_reddit_name": sub_reddit_name, "duration": duration, "status": "completed"}
     except Exception as exc:
         logger.exception("[Task] Subreddit data extraction failed for sub_reddit_name %s: %s", sub_reddit_name, exc)
         raise 
