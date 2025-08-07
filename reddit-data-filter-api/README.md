@@ -1,10 +1,10 @@
 # Reddit Data Filter API
 
-A FastAPI-based web service for fetching Reddit posts and comments using the Reddit API with OAuth authentication support.
+A FastAPI-based web service for fetching Reddit posts and comments using the Reddit API with user authentication for higher rate limits.
 
 ## Features
 
-- **OAuth Authentication**: Secure user authentication with Reddit
+- **User Authentication**: Use your Reddit credentials for higher rate limits
 - **Subreddit Posts**: Fetch posts from any subreddit with various sorting options
 - **Comments Extraction**: Get all comments for specific posts with full thread expansion
 - **Multiple Data Sources**: Support for both official Reddit API and Pushshift API
@@ -26,25 +26,24 @@ pip install -r requirements.txt
 ### 2. Reddit API Configuration
 
 1. Go to https://www.reddit.com/prefs/apps
-2. Create a new "web app"
-3. Set the redirect URI to: `http://localhost:8000/oauth/callback`
-4. Note down your `client_id` and `client_secret`
+2. Create a new "script" type app (not web app)
+3. Note down your `client_id` and `client_secret`
 
 ### 3. Environment Variables
 
-Copy `.env.example` to `.env` and fill in your Reddit API credentials:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` with your Reddit API credentials:
+Create a `.env` file in the project root with your Reddit API credentials:
 
 ```env
-REDDIT_CLIENT_ID=your_reddit_client_id
-REDDIT_CLIENT_SECRET=your_reddit_client_secret
-REDDIT_REDIRECT_URI=http://localhost:8000/oauth/callback
-REDDIT_USER_AGENT=web:reddit-data-filter:v1.0 (by u/yourusername)
+# Reddit API Credentials (from your script app)
+REDDIT_CLIENT_ID=your_client_id_here
+REDDIT_CLIENT_SECRET=your_client_secret_here
+
+# Your Reddit User Credentials (for higher rate limits)
+REDDIT_USERNAME=your_reddit_username
+REDDIT_PASSWORD=your_reddit_password
+
+# User Agent (recommended)
+REDDIT_USER_AGENT=web:reddit-data-filter:v1.0 (by u/your_reddit_username)
 ```
 
 ### 4. Run the Application
@@ -63,20 +62,18 @@ Interactive API documentation: http://localhost:8000/docs
 
 ## API Endpoints
 
-### Authentication
+### Core
 
 - `GET /` - API information and links
-- `GET /login` - Initiate Reddit OAuth login
-- `GET /oauth/callback` - Handle OAuth callback (automatic)
-- `GET /me?username={username}` - Get authenticated user info
 
 ### Reddit Data
 
 - `GET /subreddit/{subreddit_name}/posts` - Get posts from a subreddit
-  - Parameters: `listing` (new/hot/top/rising/controversial), `limit`, `username`
+  - Parameters: `listing` (new/hot/top/rising/controversial), `limit`, `use_user_auth` (boolean)
 - `GET /submission/{submission_id}` - Get a single post
+  - Parameters: `use_user_auth` (boolean)
 - `GET /submission/{submission_id}/comments` - Get post with all comments
-  - Parameters: `replace_more_limit`, `username`
+  - Parameters: `replace_more_limit`, `use_user_auth` (boolean)
 
 ### Pushshift API (Historical Data)
 
@@ -90,12 +87,12 @@ Interactive API documentation: http://localhost:8000/docs
 
 ## Usage Examples
 
-### 1. Basic Usage (No Authentication)
+### 1. Basic Usage (App-only Authentication)
 
 ```python
 import requests
 
-# Get latest posts from r/python
+# Get latest posts from r/python (lower rate limits)
 response = requests.get("http://localhost:8000/subreddit/python/posts?limit=10")
 posts = response.json()
 
@@ -104,26 +101,21 @@ for post in posts['posts']:
     print(f"- {post['title']} (Score: {post['score']})")
 ```
 
-### 2. With Authentication
+### 2. With User Authentication (Higher Rate Limits)
 
 ```python
 import requests
 
-# First, authenticate by visiting http://localhost:8000/login in browser
-# After authentication, use your Reddit username in requests
-
-username = "your_reddit_username"
-
-# Get posts with user authentication
+# Get posts with user authentication (higher rate limits)
 response = requests.get(
-    f"http://localhost:8000/subreddit/python/posts?username={username}&limit=5"
+    "http://localhost:8000/subreddit/python/posts?use_user_auth=true&limit=5"
 )
 posts = response.json()
 
-# Get a post with all comments
+# Get a post with all comments using user auth
 post_id = posts['posts'][0]['id']
 response = requests.get(
-    f"http://localhost:8000/submission/{post_id}/comments?username={username}"
+    f"http://localhost:8000/submission/{post_id}/comments?use_user_auth=true"
 )
 post_with_comments = response.json()
 
@@ -194,10 +186,10 @@ The API includes built-in rate limiting:
 
 ## Security Notes
 
-- OAuth state validation prevents CSRF attacks
-- Refresh tokens are stored in memory (use database in production)
+- User credentials are stored in environment variables (use secure credential management in production)
 - CORS is enabled for all origins (configure for production)
 - No persistent storage of user data
+- Consider using environment-specific credential management for production
 
 ## Production Deployment
 
