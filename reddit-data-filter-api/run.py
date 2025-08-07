@@ -8,7 +8,6 @@ from main import app
 if __name__ == "__main__":
     print("Starting Reddit Data Filter API...")
     print("API Documentation: http://localhost:8000/docs")
-    print("OAuth Login: http://localhost:8000/login")
     print("Make sure to set your Reddit API credentials in .env file")
     print("-" * 60)
 

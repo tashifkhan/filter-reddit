@@ -1,13 +1,10 @@
 import os
 import time
-import secrets
 from typing import Dict, Any, List, Optional, Iterator
-from urllib.parse import urlencode
 
-from fastapi import FastAPI, HTTPException, Depends, Request, Query
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 import praw
 from praw.models import Submission, Comment
 from praw.models.reddit.more import MoreComments
@@ -36,25 +33,16 @@ app.add_middleware(
 CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
 
-REDIRECT_URI = os.getenv(
-    "REDDIT_REDIRECT_URI",
-    "http://localhost:8000/oauth/callback",
-)
+# For user-specific authentication (script type app)
+REDDIT_USERNAME = os.getenv("REDDIT_USERNAME")
+REDDIT_PASSWORD = os.getenv("REDDIT_PASSWORD")
 
 USER_AGENT = os.getenv(
     "REDDIT_USER_AGENT",
     "web:reddit-data-filter:v1.0 (by u/yourusername)",
 )
 
-OAUTH_SCOPE = [
-    "identity",
-    "read",
-    "history",
-]
-
-# In-memory storage for demo (use proper database in production)
-user_tokens = {}
-oauth_states = {}
+# Configuration for user authentication
 
 
 # Pydantic models
@@ -102,11 +90,6 @@ class PostsResponse(BaseModel):
     count: int
 
 
-class OAuthResponse(BaseModel):
-    message: str
-    reddit_username: Optional[str] = None
-
-
 class ErrorResponse(BaseModel):
     error: str
     detail: Optional[str] = None
@@ -122,14 +105,14 @@ def get_reddit_client() -> praw.Reddit:
     )
 
 
-def get_reddit_client_for_user(refresh_token: str) -> praw.Reddit:
+def get_reddit_client_for_user() -> praw.Reddit:
     """Get Reddit client for user-authenticated access"""
     return praw.Reddit(
         client_id=CLIENT_ID,
         client_secret=CLIENT_SECRET,
-        refresh_token=refresh_token,
+        username=REDDIT_USERNAME,
+        password=REDDIT_PASSWORD,
         user_agent=USER_AGENT,
-        redirect_uri=REDIRECT_URI,
     )
 
 
@@ -177,11 +160,11 @@ def yield_submissions(
     subreddit_name: str,
     listing: str = "new",
     limit: Optional[int] = None,
-    use_user_token: Optional[str] = None,
+    use_user_auth: bool = False,
 ) -> Iterator[Submission]:
     """Yield submissions from a subreddit"""
-    if use_user_token:
-        reddit = get_reddit_client_for_user(use_user_token)
+    if use_user_auth:
+        reddit = get_reddit_client_for_user()
     else:
         reddit = get_reddit_client()
 
@@ -205,138 +188,15 @@ def yield_submissions(
         time.sleep(0.1)  # Be gentle with API
 
 
-# OAuth endpoints
+# API endpoints
 @app.get("/", response_model=Dict[str, str])
 async def root():
     """Root endpoint with API information"""
     return {
         "message": "Reddit Data Filter API",
         "version": "1.0.0",
-        "oauth_login": "/login",
         "docs": "/docs",
     }
-
-
-@app.get("/login", response_class=RedirectResponse)
-async def login():
-    """Initiate Reddit OAuth login"""
-    if not CLIENT_ID or not CLIENT_SECRET:
-        raise HTTPException(
-            status_code=500,
-            detail="Reddit OAuth credentials not configured",
-        )
-
-    # Generate CSRF state
-    state = secrets.token_urlsafe(16)
-    oauth_states[state] = True
-
-    # Build Reddit auth URL
-    params = {
-        "client_id": CLIENT_ID,
-        "response_type": "code",
-        "state": state,
-        "redirect_uri": REDIRECT_URI,
-        "duration": "permanent",
-        "scope": " ".join(OAUTH_SCOPE),
-    }
-    auth_url = f"https://www.reddit.com/api/v1/authorize?{urlencode(params)}"
-    return RedirectResponse(url=auth_url)
-
-
-@app.get("/oauth/callback", response_model=OAuthResponse)
-async def oauth_callback(
-    code: str = Query(...), state: str = Query(...), error: Optional[str] = Query(None)
-):
-    """Handle Reddit OAuth callback"""
-    if error:
-        raise HTTPException(status_code=400, detail=f"OAuth error: {error}")
-
-    # Validate state
-    if state not in oauth_states:
-        raise HTTPException(status_code=400, detail="Invalid state parameter")
-
-    del oauth_states[state]  # Clean up
-
-    # Exchange code for tokens
-    token_url = "https://www.reddit.com/api/v1/access_token"
-    auth = (
-        CLIENT_ID,
-        CLIENT_SECRET,
-    )
-    data = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": REDIRECT_URI,
-    }
-    headers = {
-        "User-Agent": USER_AGENT,
-    }
-
-    try:
-        resp = requests.post(
-            token_url,
-            auth=auth,
-            data=data,
-            headers=headers,
-            timeout=30,
-        )
-        resp.raise_for_status()
-        token = resp.json()
-
-    except requests.RequestException as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to exchange code for token: {str(e)}",
-        )
-
-    refresh_token = token.get("refresh_token")
-    if not refresh_token:
-        raise HTTPException(status_code=400, detail="Did not receive refresh_token")
-
-    # Get user info
-    try:
-        reddit = get_reddit_client_for_user(refresh_token)
-        user = reddit.user.me()
-        username = user.name
-
-        # Store token (use proper database in production)
-        user_tokens[username] = refresh_token
-
-        return OAuthResponse(
-            message="Successfully authenticated with Reddit",
-            reddit_username=username,
-        )
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get user info: {str(e)}",
-        )
-
-
-@app.get("/me", response_model=Dict[str, str])
-async def get_current_user(username: str = Query(...)):
-    """Get current authenticated user info"""
-    if username not in user_tokens:
-        raise HTTPException(
-            status_code=404,
-            detail="User not found or not authenticated",
-        )
-
-    try:
-        reddit = get_reddit_client_for_user(user_tokens[username])
-        user = reddit.user.me()
-        return {
-            "username": user.name,
-            "created_utc": str(user.created_utc),
-            "link_karma": str(user.link_karma),
-            "comment_karma": str(user.comment_karma),
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get user info: {str(e)}",
-        )
 
 
 # Reddit data endpoints
@@ -345,17 +205,18 @@ async def get_subreddit_posts(
     subreddit_name: str,
     listing: str = Query("new", pattern="^(new|hot|top|rising|controversial)$"),
     limit: Optional[int] = Query(100, ge=1, le=1000),
-    username: Optional[str] = Query(
-        None,
-        description="Username for authenticated requests",
+    use_user_auth: bool = Query(
+        False,
+        description="Use user authentication for higher rate limits",
     ),
 ):
     """Get posts from a subreddit"""
     try:
-        user_token = user_tokens.get(username) if username else None
         posts = []
 
-        for submission in yield_submissions(subreddit_name, listing, limit, user_token):
+        for submission in yield_submissions(
+            subreddit_name, listing, limit, use_user_auth
+        ):
             posts.append(PostData(**submission_to_dict(submission)))
 
         return PostsResponse(posts=posts, count=len(posts))
@@ -374,17 +235,15 @@ async def get_submission_with_comments(
         None,
         description="Limit for replacing MoreComments objects",
     ),
-    username: Optional[str] = Query(
-        None,
-        description="Username for authenticated requests",
+    use_user_auth: bool = Query(
+        False,
+        description="Use user authentication for higher rate limits",
     ),
 ):
     """Get a submission with all its comments"""
     try:
-        user_token = user_tokens.get(username) if username else None
-
-        if user_token:
-            reddit = get_reddit_client_for_user(user_token)
+        if use_user_auth:
+            reddit = get_reddit_client_for_user()
         else:
             reddit = get_reddit_client()
 
@@ -416,17 +275,15 @@ async def get_submission_with_comments(
 @app.get("/submission/{submission_id}", response_model=PostData)
 async def get_submission(
     submission_id: str,
-    username: Optional[str] = Query(
-        None,
-        description="Username for authenticated requests",
+    use_user_auth: bool = Query(
+        False,
+        description="Use user authentication for higher rate limits",
     ),
 ):
     """Get a single submission without comments"""
     try:
-        user_token = user_tokens.get(username) if username else None
-
-        if user_token:
-            reddit = get_reddit_client_for_user(user_token)
+        if use_user_auth:
+            reddit = get_reddit_client_for_user()
         else:
             reddit = get_reddit_client()
 
@@ -508,7 +365,12 @@ async def get_pushshift_comments(
             if last_timestamp is not None:
                 params["after"] = last_timestamp + 1
 
-            response = requests.get(url, params=params, timeout=30)
+            response = requests.get(
+                url,
+                params=params,
+                timeout=30,
+            )
+
             response.raise_for_status()
             data = response.json().get("data", [])
 
@@ -519,7 +381,10 @@ async def get_pushshift_comments(
             last_timestamp = data[-1]["created_utc"]
             time.sleep(0.5)  # Be gentle with API
 
-        return {"comments": all_comments, "count": len(all_comments)}
+        return {
+            "comments": all_comments,
+            "count": len(all_comments),
+        }
 
     except requests.RequestException as e:
         raise HTTPException(
