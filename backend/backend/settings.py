@@ -146,12 +146,19 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Kafka Configuration
-SUB_REDDIT_DATA_TOPIC = 'sub_reddit_data_extraction'
+EMBEDDINGS_TOPIC = 'sub_reddit_embeddings'
+EMBEDDINGS_KAFKA_CONSUMER_GROUP_ID = 'sub_reddit_embeddings_consumer'
+
+KAFKA_BOOTSTRAP_SERVERS = 'localhost:9092'
+
+## Opensearch Configuration
+OPENSEARCH_HOST=localhost
+OPENSEARCH_PORT=9200
+OPENSEARCH_USER=admin
+OPENSEARCH_PASSWORD=admin
+REDDIT_DATA_OPENSEARCH_INDEX = 'reddit_data_index'
+
 
 # Celery Configuration
 CELERY_BROKER_URL = 'redis://localhost:6379/0'  # Using Redis as broker
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = 'UTC'
+

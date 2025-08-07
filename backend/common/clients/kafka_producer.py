@@ -1,5 +1,6 @@
 import logging
 import json
+import threading
 from typing import Dict, Any
 from django.conf import settings
 from confluent_kafka import Producer
@@ -7,8 +8,22 @@ from confluent_kafka import Producer
 logger = logging.getLogger(__name__)
 
 class KafkaProducer:
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls):
+        if not cls._instance:
+            with cls._lock:
+                if not cls._instance:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
+
     def __init__(self):
         """Initialize the Kafka producer with configuration from Django settings."""
+        # Ensure that initialization happens only once
+        if hasattr(self, 'producer'):
+            return
+
         # Get configuration from Django settings
         self.bootstrap_servers = getattr(settings, 'KAFKA_BOOTSTRAP_SERVERS', None)
         if not self.bootstrap_servers:

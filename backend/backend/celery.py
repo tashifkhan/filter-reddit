@@ -22,6 +22,9 @@ queues = {
     "sub_reddit_fetch.tasks.run_sub_reddit_data.fetch_sub_reddit_data": {
         "queue": "sub_reddit_fetch"
     },
+    "sub_reddit_fetch.tasks.run_embeddings_ingestion.ingest_embeddings": {
+        "queue": "sub_reddit_embeddings"
+    },
 }
 
 app.conf.task_routes = queues
